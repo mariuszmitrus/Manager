@@ -1,0 +1,78 @@
+# --- FILL IN ONLY THESE 3 VARIABLES ---
+$OldLogin     = "n.last_old"
+$NewFirstName = "Name"
+$NewLastName  = "LASTNAME"
+# --------------------------------------
+
+Import-Module ActiveDirectory
+
+# Function to remove Polish and French diacritics
+Function Remove-Diacritics {
+    param([string]$Text)
+    $Text = $Text.ToLower().Trim()
+    $Text = $Text.Replace('ą','a').Replace('ć','c').Replace('ę','e').Replace('ł','l').Replace('ń','n').Replace('ó','o').Replace('ś','s').Replace('ż','z').Replace('ź','z')
+    $Text = $Text.Replace('é','e').Replace('è','e').Replace('ê','e').Replace('ë','e').Replace('à','a').Replace('â','a').Replace('ç','c').Replace('î','i').Replace('ï','i').Replace('ô','o').Replace('ù','u').Replace('û','u')
+    $Text = $Text.Replace(' ','')
+    return $Text
+}
+
+$User = Get-ADUser -Identity $OldLogin -Properties proxyAddresses, targetAddress, UserPrincipalName
+if ($User) {
+    # Automatically retrieve domains from the user's old attributes
+    $Domain = ($User.UserPrincipalName -split "@")[1]
+    $TargetDomain = ($User.targetAddress -creplace "^SMTP:","" -creplace "^smtp:","" -split "@")[1]
+
+    # Generate clean strings without special characters
+    $CleanFirst = Remove-Diacritics $NewFirstName
+    $CleanLast  = Remove-Diacritics $NewLastName
+
+    # Formatting according to your standard
+    $NewFullName       = "$($NewLastName.ToUpper()) $NewFirstName" # E.g. BELAOUD Hakima
+    $NewSamAccountName = "$($CleanFirst.Substring(0,1)).$CleanLast" # E.g. h.belaoud
+    $NewEmailAddress   = "$CleanFirst.$CleanLast@$Domain"
+    $NewUPN            = $NewEmailAddress
+    $NewMailNickname   = $NewSamAccountName
+    $NewTargetAddress  = "SMTP:$CleanFirst.$CleanLast@$TargetDomain"
+    $NewRoutingAlias   = "smtp:$CleanFirst.$CleanLast@$TargetDomain"
+
+    $UserGUID = $User.ObjectGUID
+    Write-Host "Starting update for: $($User.Name) -> $NewFullName" -ForegroundColor Cyan
+
+    # 1. Change the object name (CN)
+    Rename-ADObject -Identity $User.DistinguishedName -NewName $NewFullName
+    Write-Host "[OK] Object name (CN) changed successfully." -ForegroundColor Green
+
+    # 2. Update basic attributes
+    Set-ADUser -Identity $UserGUID `
+        -GivenName $NewFirstName `
+        -Surname $NewLastName `
+        -DisplayName $NewFullName `
+        -UserPrincipalName $NewUPN `
+        -SamAccountName $NewSamAccountName `
+        -EmailAddress $NewEmailAddress
+    Write-Host "[OK] Basic attributes updated (UPN, SN, Email, SamAccountName)." -ForegroundColor Green
+
+    # 3. Handle proxyAddresses (change main SMTP to smtp alias)
+    $CurrentPrimary = $User.proxyAddresses | Where-Object { $_ -cmatch "^SMTP:" }
+    
+    if ($CurrentPrimary) {
+        $OldAsAlias = $CurrentPrimary -creplace "^SMTP:", "smtp:"
+        # Remove the old primary address
+        Set-ADUser -Identity $UserGUID -Remove @{ proxyAddresses = $CurrentPrimary }
+        # Add new primary (SMTP), old as alias (smtp), and new onmicrosoft address (smtp)
+        Set-ADUser -Identity $UserGUID -Add @{ proxyAddresses = @("SMTP:$NewEmailAddress", $OldAsAlias, $NewRoutingAlias) }
+    } else {
+        # Fallback in case the object is missing a primary SMTP address
+        Set-ADUser -Identity $UserGUID -Add @{ proxyAddresses = @("SMTP:$NewEmailAddress", $NewRoutingAlias) }
+    }
+
+    # 4. Update targetAddress and Exchange alias
+    Set-ADUser -Identity $UserGUID -Replace @{
+        targetAddress = $NewTargetAddress
+        mailNickname  = $NewMailNickname
+    }
+
+    Write-Host "[OK] Exchange/M365 mail attributes updated." -ForegroundColor Green
+    Write-Host "Operation completed successfully. Run AD Sync (Entra Connect)." -ForegroundColor Cyan
+} else {
+    Write-Warning "User not found with login: $OldLogin"
