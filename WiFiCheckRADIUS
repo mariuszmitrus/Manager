@@ -1,41 +1,70 @@
-$computerName = $env:COMPUTERNAME
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "COMPUTER NAME: $computerName" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
+Clear-Host
 
-# 2. Wi-Fi Adapter Physical (MAC) Address
-Write-Host "`nSearching for Wi-Fi MAC address..." -ForegroundColor Yellow
-$wifiAdapters = Get-NetAdapter | Where-Object { $_.Name -match "Wi-Fi" -or $_.InterfaceDescription -match "Wireless" -or $_.InterfaceDescription -match "Wi-Fi" }
+$logPath = ".\log.txt"
 
-if ($wifiAdapters) {
-    foreach ($adapter in $wifiAdapters) {
-        Write-Host "Adapter: $($adapter.Name) ($($adapter.InterfaceDescription))"
-        Write-Host "MAC Address: $($adapter.MacAddress)" -ForegroundColor Green
+# Block to capture all output
+$scriptOutput = $(
+    Write-Output "========================================"
+    Write-Output "COMPUTER NAME: $env:COMPUTERNAME"
+    Write-Output "========================================"
+    Write-Output ""
+
+    # 1. Wi-Fi Adapter Physical (MAC) Address
+    Write-Output "Searching for Wi-Fi MAC address..."
+    $wifiAdapters = Get-NetAdapter | Where-Object { $_.Name -match "Wi-Fi" -or $_.InterfaceDescription -match "Wireless" -or $_.InterfaceDescription -match "Wi-Fi" }
+
+    if ($wifiAdapters) {
+        foreach ($adapter in $wifiAdapters) {
+            Write-Output "Adapter: $($adapter.Name) ($($adapter.InterfaceDescription))"
+            Write-Output "MAC Address: $($adapter.MacAddress)"
+        }
+    } else {
+        Write-Output "No active Wi-Fi adapter found in the system."
     }
-} else {
-    Write-Host "No active Wi-Fi adapter found in the system." -ForegroundColor Red
-}
 
-# 3. Saved Wi-Fi Profiles
-Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "SAVED WI-FI PROFILES" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
+    Write-Output ""
+    Write-Output "========================================"
+    Write-Output "SAVED WI-FI PROFILES"
+    Write-Output "========================================"
+    Write-Output ""
 
-# Fetching profiles (optimized for English OS)
-$profiles = netsh wlan show profiles | Select-String -Pattern "All User Profile" | ForEach-Object { 
-    $_.Line.Split(":")[1].Trim() 
-}
-
-if ($profiles) {
-    foreach ($profile in $profiles) {
-        Write-Host "`n--- Details for profile: $profile ---" -ForegroundColor Yellow
-        # Show configuration of the specific profile
-        netsh wlan show profile name="$profile"
+    # 2. Fetching profiles (optimized for English OS)
+    $profiles = netsh wlan show profiles | Select-String -Pattern "All User Profile" | ForEach-Object { 
+        $_.Line.Split(":")[1].Trim() 
     }
-} else {
-    Write-Host "No saved Wi-Fi profiles found on this computer." -ForegroundColor Red
-}
-certutil -user -store my
-certutil -store my
-certutil -store Root
+
+    if ($profiles) {
+        foreach ($profile in $profiles) {
+            Write-Output ""
+            Write-Output "--- Details for profile: $profile ---"
+            # Directly invoking netsh so its output is captured in the stream
+            netsh wlan show profile name="$profile"
+        }
+    } else {
+        Write-Output "No saved Wi-Fi profiles found on this computer."
+    }
+
+    Write-Output ""
+    Write-Output "========================================"
+    Write-Output "CERTIFICATES INFORMATION"
+    Write-Output "========================================"
+    
+    # 3. Fetching certificate details
+    Write-Output "`n--- User Personal Certificates (certutil -user -store my) ---"
+    certutil -user -store my
+
+    Write-Output "`n--- Local Machine Personal Certificates (certutil -store my) ---"
+    certutil -store my
+
+    Write-Output "`n--- Trusted Root Certificates (certutil -store Root) ---"
+    certutil -store Root
+
+    Write-Output ""
+    Write-Output "Information gathering complete."
+)
+
+# This outputs to the console AND saves to log.txt at the same time
+$scriptOutput | Tee-Object -FilePath $logPath
+
+Write-Host "`n[!] Output has been saved to: $(Resolve-Path $logPath)" -ForegroundColor Green
 Write-Host "`nInformation gathering complete." -ForegroundColor Cyan
