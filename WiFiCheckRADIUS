@@ -1,0 +1,41 @@
+$computerName = $env:COMPUTERNAME
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "COMPUTER NAME: $computerName" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+
+# 2. Wi-Fi Adapter Physical (MAC) Address
+Write-Host "`nSearching for Wi-Fi MAC address..." -ForegroundColor Yellow
+$wifiAdapters = Get-NetAdapter | Where-Object { $_.Name -match "Wi-Fi" -or $_.InterfaceDescription -match "Wireless" -or $_.InterfaceDescription -match "Wi-Fi" }
+
+if ($wifiAdapters) {
+    foreach ($adapter in $wifiAdapters) {
+        Write-Host "Adapter: $($adapter.Name) ($($adapter.InterfaceDescription))"
+        Write-Host "MAC Address: $($adapter.MacAddress)" -ForegroundColor Green
+    }
+} else {
+    Write-Host "No active Wi-Fi adapter found in the system." -ForegroundColor Red
+}
+
+# 3. Saved Wi-Fi Profiles
+Write-Host "`n========================================" -ForegroundColor Cyan
+Write-Host "SAVED WI-FI PROFILES" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+
+# Fetching profiles (optimized for English OS)
+$profiles = netsh wlan show profiles | Select-String -Pattern "All User Profile" | ForEach-Object { 
+    $_.Line.Split(":")[1].Trim() 
+}
+
+if ($profiles) {
+    foreach ($profile in $profiles) {
+        Write-Host "`n--- Details for profile: $profile ---" -ForegroundColor Yellow
+        # Show configuration of the specific profile
+        netsh wlan show profile name="$profile"
+    }
+} else {
+    Write-Host "No saved Wi-Fi profiles found on this computer." -ForegroundColor Red
+}
+certutil -user -store my
+certutil -store my
+certutil -store Root
+Write-Host "`nInformation gathering complete." -ForegroundColor Cyan
