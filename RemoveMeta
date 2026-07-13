@@ -1,24 +1,84 @@
-@echo off
-REM =====================================================================
-REM Script to recursively remove metadata from specific file types.
-REM Target formats: Word (.doc, .docx), Excel (.xls, .xlsx), DWG, DNG.
-REM Requirement: exiftool.exe must be available in the system PATH 
-REM or located in the same directory as this script.
-REM =====================================================================
+# =====================================================================
+# PowerShell script to strip metadata from DOC/DOCX, XLS/XLSX, and DNG
+# NOTE: Requires MS Office installed for Word/Excel processing.
+# NOTE: DWG files are excluded as they require Autodesk CAD software.
+# =====================================================================
 
-echo Starting metadata removal process...
-echo Scanning current directory and all subdirectories.
-echo.
+$scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
-REM Execute ExifTool with the following arguments:
-REM -r                  : Recursively process subdirectories
-REM -all=               : Remove all metadata tags
-REM -overwrite_original : Overwrite the file directly without creating a *_original backup file
-REM -ext [extension]    : Target specific file extensions
-REM .                   : Target the current directory (where the script is executed)
+Write-Host "--- STEP 1: Processing DNG files (ExifTool) ---" -ForegroundColor Cyan
+$exifTool = Join-Path -Path $scriptPath -ChildPath "exiftool.exe"
 
-exiftool -r -all= -overwrite_original -ext doc -ext docx -ext xls -ext xlsx -ext dwg -ext dng .
+if (Test-Path $exifTool) {
+    # Process only DNG files with ExifTool recursively
+    & $exifTool -r -all= -overwrite_original -ext dng $scriptPath
+} else {
+    Write-Host "exiftool.exe not found. Skipping DNG files." -ForegroundColor Yellow
+}
 
-echo.
-echo Metadata removal successfully completed!
-pause
+Write-Host "`n--- STEP 2: Processing MS Office files (COM Objects) ---" -ForegroundColor Cyan
+# Fetch all Word and Excel files in current directory and all subdirectories
+$files = Get-ChildItem -Path $scriptPath -Include *.doc, *.docx, *.xls, *.xlsx -Recurse
+
+if ($files.Count -gt 0) {
+    $wordApp = $null
+    $excelApp = $null
+
+    foreach ($file in $files) {
+        Write-Host "Processing: $($file.Name)"
+        
+        if ($file.Extension -match "doc") {
+            # Initialize Word application in the background if not already open
+            if ($null -eq $wordApp) {
+                $wordApp = New-Object -ComObject Word.Application
+                $wordApp.Visible = $false
+                $wordApp.DisplayAlerts = 0 
+            }
+            try {
+                $doc = $wordApp.Documents.Open($file.FullName)
+                # This built-in MS Office function strips metadata upon saving
+                $doc.RemovePersonalInformation = $true
+                $doc.Save()
+                $doc.Close()
+                Write-Host "  -> Success (Word)" -ForegroundColor Green
+            } catch {
+                Write-Host "  -> Error processing Word file: $_" -ForegroundColor Red
+            }
+        }
+        elseif ($file.Extension -match "xls") {
+            # Initialize Excel application in the background if not already open
+            if ($null -eq $excelApp) {
+                $excelApp = New-Object -ComObject Excel.Application
+                $excelApp.Visible = $false
+                $excelApp.DisplayAlerts = $false
+            }
+            try {
+                $wb = $excelApp.Workbooks.Open($file.FullName)
+                # This built-in MS Office function strips metadata upon saving
+                $wb.RemovePersonalInformation = $true
+                $wb.Save()
+                $wb.Close()
+                Write-Host "  -> Success (Excel)" -ForegroundColor Green
+            } catch {
+                Write-Host "  -> Error processing Excel file: $_" -ForegroundColor Red
+            }
+        }
+    }
+
+    Write-Host "`nCleaning up background processes..." -ForegroundColor Cyan
+    # Safely close and cleanup COM objects from memory to prevent memory leaks
+    if ($wordApp) { 
+        $wordApp.Quit()
+        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($wordApp) | Out-Null 
+    }
+    if ($excelApp) { 
+        $excelApp.Quit()
+        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excelApp) | Out-Null 
+    }
+    [System.GC]::Collect()
+    [System.GC]::WaitForPendingFinalizers()
+} else {
+    Write-Host "No MS Office files found." -ForegroundColor Yellow
+}
+
+Write-Host "`nProcess completed successfully." -ForegroundColor Green
